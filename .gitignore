@@ -1,0 +1,20 @@
+# Python 后端
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/uvicorn.log
+backend/uvicorn.err.log
+
+# 财务数据库：私密数据不上传（用系统设置里的 JSON 备份手动迁移）
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
+
+# 前端依赖与构建产物
+frontend/node_modules/
+frontend/dist/
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+.DS_Store
