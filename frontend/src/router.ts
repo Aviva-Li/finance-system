@@ -1,8 +1,8 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, type RouteRecordRaw } from 'vue-router'
 import { session } from './state'
 import AppLayout from './layout/AppLayout.vue'
 
-const routes = [
+const routes: RouteRecordRaw[] = [
   {
     path: '/login',
     name: 'login',
@@ -31,6 +31,12 @@ const routes = [
         name: 'accounts',
         component: () => import('./views/AccountsView.vue'),
         meta: { title: '账户管理' },
+      },
+      {
+        path: 'allocation',
+        name: 'allocation',
+        component: () => import('./views/AllocationView.vue'),
+        meta: { title: '七账户分配' },
       },
       {
         path: 'categories',

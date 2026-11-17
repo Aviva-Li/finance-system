@@ -54,7 +54,7 @@ def network():
 def export(conn = Depends(get_db)):
     """全量数据 JSON 备份（不含访问密码）。"""
     return {
-        'version': 1,
+        'version': 2,
         'exported_at': datetime.now().isoformat(timespec='seconds'),
         'accounts': [dict(r) for r in
                      conn.execute('SELECT * FROM accounts ORDER BY id')],
@@ -62,6 +62,12 @@ def export(conn = Depends(get_db)):
                        conn.execute('SELECT * FROM categories ORDER BY id')],
         'transactions': [dict(r) for r in
                          conn.execute('SELECT * FROM transactions ORDER BY id')],
+        'allocation_rules': [dict(r) for r in
+                             conn.execute('SELECT * FROM allocation_rules ORDER BY sort')],
+        'allocations': [dict(r) for r in
+                        conn.execute('SELECT * FROM allocations ORDER BY id')],
+        'expense_jars': [dict(r) for r in
+                         conn.execute('SELECT * FROM expense_jars')],
     }
 
 
@@ -110,6 +116,31 @@ def _tx_delta(t: dict) -> float:
     return 0.0   # adjust 缺 delta 时按 0 处理，导入后可用「调整余额」校准
 
 
+MONTH_RE = re.compile(r'^\d{4}-\d{2}$')
+JARS = {'nec', 'ffa', 'lts', 'play', 'edu', 'give', 'random'}
+
+
+def _validate_allocation(allocations, expense_jars, tx_ids):
+    """校验备份数据里的分配记录与支出额度归属。"""
+    for a in allocations:
+        if not isinstance(a, dict) or a.get('tx_id') not in tx_ids:
+            raise HTTPException(400, '分配记录引用了备份中不存在的流水')
+        if a.get('jar') not in JARS:
+            raise HTTPException(400, f"分配记录账户非法：{a.get('jar')}")
+        if not isinstance(a.get('month'), str) or not MONTH_RE.match(a['month']):
+            raise HTTPException(400, f"分配记录月份非法：{a.get('month')}")
+        amt = a.get('amount')
+        if not isinstance(amt, (int, float)) or isinstance(amt, bool) or amt != amt:
+            raise HTTPException(400, '分配记录金额不是数字')
+    for e in expense_jars:
+        if not isinstance(e, dict) or e.get('tx_id') not in tx_ids:
+            raise HTTPException(400, '支出额度归属引用了备份中不存在的流水')
+        if e.get('jar') not in JARS:
+            raise HTTPException(400, f"支出额度账户非法：{e.get('jar')}")
+        if not isinstance(e.get('month'), str) or not MONTH_RE.match(e['month']):
+            raise HTTPException(400, f"支出额度月份非法：{e.get('month')}")
+
+
 @router.post('/import')
 def import_data(body: ImportReq, conn = Depends(get_db)):
     """JSON 恢复：整体替换现有数据（单事务，出错全部回滚）。"""
@@ -121,7 +152,19 @@ def import_data(body: ImportReq, conn = Depends(get_db)):
             and isinstance(transactions, list)):
         raise HTTPException(400, '备份格式不正确：缺少 accounts / categories / transactions')
     _validate_backup(accounts, categories, transactions)
+    tx_ids = {t['id'] for t in transactions if isinstance(t.get('id'), int)}
+    if len(tx_ids) != len(transactions):
+        raise HTTPException(400, '备份中存在重复的流水 id')
+    allocations = data.get('allocations') or []
+    expense_jars = data.get('expense_jars') or []
+    rules = data.get('allocation_rules') or []
+    if not isinstance(allocations, list) or not isinstance(expense_jars, list) \
+            or not isinstance(rules, list):
+        raise HTTPException(400, '备份数据的分配信息格式不正确')
+    _validate_allocation(allocations, expense_jars, tx_ids)
     with tx(conn):
+        conn.execute('DELETE FROM allocations')
+        conn.execute('DELETE FROM expense_jars')
         conn.execute('DELETE FROM transactions')
         conn.execute('DELETE FROM accounts')
         conn.execute('DELETE FROM categories')
@@ -143,21 +186,37 @@ def import_data(body: ImportReq, conn = Depends(get_db)):
                  round(_tx_delta(t), 2), t['account_id'],
                  t.get('category'), t.get('note'), t['date'],
                  t.get('transfer_group')))
+        for r in rules:
+            if isinstance(r, dict) and r.get('key') in JARS:
+                conn.execute(
+                    'UPDATE allocation_rules SET name=?, percent=? WHERE key=?',
+                    (str(r.get('name') or '').strip()[:30] or r['key'],
+                     float(r.get('percent', 0)), r['key']))
+        for a in allocations:
+            conn.execute(
+                'INSERT INTO allocations(tx_id, month, jar, amount) VALUES(?, ?, ?, ?)',
+                (a['tx_id'], a['month'], a['jar'], round(float(a['amount']), 2)))
+        for e in expense_jars:
+            conn.execute(
+                'INSERT INTO expense_jars(tx_id, jar, month) VALUES(?, ?, ?)',
+                (e['tx_id'], e['jar'], e['month']))
     return {'message': '导入成功', 'counts': {
         'accounts': len(accounts), 'categories': len(categories),
-        'transactions': len(transactions)}}
+        'transactions': len(transactions), 'allocations': len(allocations)}}
 
 
 @router.post('/reset')
 def reset(conn = Depends(get_db)):
     """重置全部数据：清空账户/流水/分类，恢复默认分类（密码保持不变）。"""
     with tx(conn):
+        conn.execute('DELETE FROM allocations')
+        conn.execute('DELETE FROM expense_jars')
         conn.execute('DELETE FROM transactions')
         conn.execute('DELETE FROM accounts')
         conn.execute('DELETE FROM categories')
         conn.executemany('INSERT INTO categories(name, type) VALUES(?, ?)',
                          DEFAULT_CATEGORIES)
-    return {'message': '已重置全部数据（访问密码保持不变）'}
+    return {'message': '已重置全部数据（访问密码与分配规则保持不变）'}
 
 
 @router.post('/password')

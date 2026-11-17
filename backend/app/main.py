@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 
 from .auth import TOKENS
 from .database import init_db
-from .routers import accounts, auth as auth_router, categories, funds, stats, system, transactions
+from .routers import accounts, allocation, auth as auth_router, categories, funds, stats, system, transactions
 
 
 @asynccontextmanager
@@ -67,6 +67,7 @@ app.include_router(auth_router.router, prefix='/api')
 app.include_router(accounts.router, prefix='/api')
 app.include_router(transactions.router, prefix='/api')
 app.include_router(categories.router, prefix='/api')
+app.include_router(allocation.router, prefix='/api')
 app.include_router(stats.router, prefix='/api')
 app.include_router(system.router, prefix='/api')
 app.include_router(funds.router, prefix='/api')

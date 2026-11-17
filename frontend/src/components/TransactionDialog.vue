@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { api, type Account, type Category, type Transaction } from '../api'
+import { api, type Account, type Category, type JarRule, type Transaction } from '../api'
 import { today } from '../utils'
 
 const props = defineProps<{
@@ -19,6 +19,7 @@ const formRef = ref()
 const saving = ref(false)
 const accounts = ref<Account[]>([])
 const categories = ref<Category[]>([])
+const jars = ref<JarRule[]>([])
 const loading = ref(false)
 
 const form = reactive({
@@ -28,6 +29,7 @@ const form = reactive({
   category: '',
   note: '',
   date: today(),
+  jar: '',
 })
 
 const title = computed(() => {
@@ -55,6 +57,7 @@ function resetForm() {
     form.category = item.category || ''
     form.note = item.note || ''
     form.date = item.date
+    form.jar = item.jar || ''
   } else {
     form.type = props.initialType || 'expense'
     form.account_id = undefined
@@ -62,6 +65,7 @@ function resetForm() {
     form.category = ''
     form.note = ''
     form.date = today()
+    form.jar = ''
   }
   formRef.value?.clearValidate?.()
 }
@@ -69,9 +73,14 @@ function resetForm() {
 async function loadOptions() {
   loading.value = true
   try {
-    const [accs, cats] = await Promise.all([api.accounts.list(), api.categories.list()])
+    const [accs, cats, jarRules] = await Promise.all([
+      api.accounts.list(),
+      api.categories.list(),
+      api.allocation.rules().catch(() => [] as JarRule[]),
+    ])
     accounts.value = accs.filter((a) => a.enabled)
     categories.value = cats
+    jars.value = jarRules
     if (!props.editItem && !form.account_id && accounts.value.length === 1) {
       form.account_id = accounts.value[0].id
     }
@@ -120,6 +129,7 @@ async function submit() {
       category: form.category,
       note: form.note || undefined,
       date: form.date,
+      jar: form.type === 'expense' && form.jar ? form.jar : undefined,
     }
     if (props.editItem) {
       await api.transactions.update(props.editItem.id, body)
@@ -189,6 +199,12 @@ async function submit() {
           style="width: 100%"
         />
       </el-form-item>
+      <el-form-item v-if="form.type === 'expense' && jars.length" label="计入七账户额度（可选）">
+        <el-select v-model="form.jar" placeholder="不计入额度" clearable style="width: 100%">
+          <el-option v-for="j in jars" :key="j.key" :label="j.name" :value="j.key" />
+        </el-select>
+        <div class="jar-hint">选择后，这笔支出会计入「七账户分配」里对应账户的本月额度</div>
+      </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="form.note" maxlength="200" placeholder="可选，例如：超市采购" />
       </el-form-item>
@@ -199,3 +215,12 @@ async function submit() {
     </template>
   </el-dialog>
 </template>
+
+<style scoped>
+.jar-hint {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-top: 4px;
+}
+</style>

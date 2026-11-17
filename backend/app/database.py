@@ -41,6 +41,28 @@ CREATE TABLE IF NOT EXISTS settings(
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS allocation_rules(
+  key TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  percent REAL NOT NULL DEFAULT 0,
+  sort INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS allocations(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tx_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  month TEXT NOT NULL,
+  jar TEXT NOT NULL,
+  amount REAL NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_alloc_month ON allocations(month);
+CREATE INDEX IF NOT EXISTS idx_alloc_tx ON allocations(tx_id);
+CREATE TABLE IF NOT EXISTS expense_jars(
+  tx_id INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
+  jar TEXT NOT NULL,
+  month TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ejar_month ON expense_jars(month);
 """
 
 # 首次启动的默认分类（可自行增删）
@@ -59,6 +81,17 @@ DEFAULT_CATEGORIES = [
 DEFAULT_SETTINGS = {
     'access_password': '123456',   # 默认访问密码，可在「系统设置」里修改
 }
+
+# 七账户分配（六罐子）默认规则：key 顺序即展示顺序
+DEFAULT_JARS = [
+    ('nec', 'NEC 生活必需', 40, 1),
+    ('ffa', 'FFA 财务自由', 15, 2),
+    ('lts', 'LTS 长期储蓄', 15, 3),
+    ('play', 'PLAY 玩乐', 10, 4),
+    ('edu', 'EDU 教育', 10, 5),
+    ('give', 'GIVE 付出', 5, 6),
+    ('random', 'RANDOM 随机', 5, 7),
+]
 
 
 def get_conn() -> sqlite3.Connection:
@@ -113,5 +146,9 @@ def init_db():
             conn.executemany(
                 'INSERT INTO settings(key, value) VALUES(?, ?)',
                 list(DEFAULT_SETTINGS.items()))
+        if conn.execute('SELECT COUNT(*) FROM allocation_rules').fetchone()[0] == 0:
+            conn.executemany(
+                'INSERT INTO allocation_rules(key, name, percent, sort) VALUES(?, ?, ?, ?)',
+                DEFAULT_JARS)
     finally:
         conn.close()

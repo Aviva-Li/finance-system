@@ -44,13 +44,14 @@ class AccountUpdate(BaseModel):
 
 
 class TransactionCreate(BaseModel):
-    """新增/编辑收支流水。"""
+    """新增/编辑收支流水。jar 为可选的七账户规划额度（仅支出时生效）。"""
     type: Literal['income', 'expense']
     account_id: int = Field(gt=0)
     amount: float = Field(gt=0, le=1e10, examples=[35.5])
     category: str = Field(min_length=1, max_length=50)
     note: Optional[str] = Field(default=None, max_length=200)
     date: str = Field(examples=['2026-11-16'])
+    jar: Optional[str] = Field(default=None, max_length=20)
 
     @field_validator('date')
     @classmethod
@@ -107,3 +108,22 @@ class PasswordReq(BaseModel):
 
 class ImportReq(BaseModel):
     data: dict
+
+
+class AllocationRuleItem(BaseModel):
+    """单条规划账户规则。"""
+    key: str = Field(min_length=1, max_length=20)
+    name: str = Field(min_length=1, max_length=30)
+    percent: float = Field(ge=0, le=100)
+
+    @field_validator('name')
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError('规划账户名称不能为空')
+        return v.strip()
+
+
+class AllocationRulesUpdate(BaseModel):
+    """整体提交七条规划账户规则，比例合计必须为 100%。"""
+    items: list[AllocationRuleItem] = Field(min_length=7, max_length=7)

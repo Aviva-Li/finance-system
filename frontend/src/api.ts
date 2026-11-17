@@ -36,6 +36,7 @@ export interface Transaction {
   date: string
   created_at?: string
   transfer_group?: string | null
+  jar?: string | null
 }
 
 export interface TxPage {
@@ -70,6 +71,29 @@ export interface NetworkInfo {
   backend_port: number
   frontend_url: string
   backend_url: string
+}
+
+export interface JarRule {
+  key: string
+  name: string
+  percent: number
+  sort?: number
+}
+
+export interface JarOverview {
+  key: string
+  name: string
+  percent: number
+  allocated: number
+  spent: number
+  remaining: number
+}
+
+export interface AllocationOverview {
+  month: string
+  jars: JarOverview[]
+  allocated_total: number
+  spent_total: number
 }
 
 function buildQuery(params?: Record<string, any>) {
@@ -187,6 +211,7 @@ export const api = {
       category: string
       note?: string
       date: string
+      jar?: string
     }) => request<Transaction>('/transactions', { method: 'POST', body }),
     update: (id: number, body: {
       type: 'income' | 'expense'
@@ -195,6 +220,7 @@ export const api = {
       category: string
       note?: string
       date: string
+      jar?: string
     }) => request<Transaction>(`/transactions/${id}`, { method: 'PUT', body }),
     remove: (id: number) => request<{ message: string }>(`/transactions/${id}`, { method: 'DELETE' }),
     exportCsv: async (params: TxQuery) => {
@@ -218,6 +244,22 @@ export const api = {
     update: (id: number, body: { name?: string; enabled?: boolean }) =>
       request<Category>(`/categories/${id}`, { method: 'PUT', body }),
     remove: (id: number) => request<{ message: string }>(`/categories/${id}`, { method: 'DELETE' }),
+  },
+
+  allocation: {
+    rules: () => request<JarRule[]>('/allocation/rules'),
+    updateRules: (items: JarRule[]) =>
+      request<{ message: string }>('/allocation/rules', {
+        method: 'PUT',
+        body: { items },
+      }),
+    overview: (month?: string) =>
+      request<AllocationOverview>('/allocation/overview', { params: { month } }),
+    reallocate: (month: string) =>
+      request<{ message: string }>('/allocation/reallocate', {
+        method: 'POST',
+        body: { month },
+      }),
   },
 
   stats: {

@@ -10,6 +10,7 @@ const menus = [
   { name: 'dashboard', label: '仪表盘', icon: 'Odometer' },
   { name: 'transactions', label: '流水记录', icon: 'Tickets' },
   { name: 'accounts', label: '账户管理', icon: 'Wallet' },
+  { name: 'allocation', label: '七账户分配', icon: 'PieChart' },
   { name: 'categories', label: '收支分类', icon: 'PriceTag' },
   { name: 'reports', label: '统计报表', icon: 'TrendCharts' },
   { name: 'settings', label: '系统设置', icon: 'Setting' },

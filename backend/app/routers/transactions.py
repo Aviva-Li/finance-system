@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from ..database import get_db, tx
 from ..schemas import TransactionCreate
+from .allocation import JAR_SET, allocate_income, clear_allocations, month_of, set_expense_jar
 
 router = APIRouter(prefix='/transactions', tags=['流水'])
 
@@ -22,6 +23,7 @@ def _today() -> str:
 
 
 def _row_to_item(row) -> dict:
+    keys = set(row.keys())
     return {
         'id': row['id'], 'type': row['type'], 'amount': row['amount'],
         'delta': row['delta'],
@@ -29,11 +31,13 @@ def _row_to_item(row) -> dict:
         'account_type': row['account_type'], 'category': row['category'],
         'note': row['note'], 'date': row['date'], 'created_at': row['created_at'],
         'transfer_group': row['transfer_group'],
+        'jar': row['jar'] if 'jar' in keys else None,
     }
 
 
-_SELECT = ("SELECT t.*, a.name AS account_name, a.type AS account_type "
-           "FROM transactions t JOIN accounts a ON a.id = t.account_id")
+_SELECT = ("SELECT t.*, a.name AS account_name, a.type AS account_type, ej.jar AS jar "
+           "FROM transactions t JOIN accounts a ON a.id = t.account_id "
+           "LEFT JOIN expense_jars ej ON ej.tx_id = t.id")
 
 
 def _build_where(start, end, account_id, tx_type, category, keyword):
@@ -113,6 +117,8 @@ def create_transaction(body: TransactionCreate, conn = Depends(get_db)):
         raise HTTPException(404, '账户不存在')
     if not acc['enabled']:
         raise HTTPException(400, f"账户「{acc['name']}」已停用")
+    if body.jar and body.jar not in JAR_SET:
+        raise HTTPException(400, '支出计入的规划账户不存在')
     amt = round(body.amount, 2)
     delta = amt if body.type == 'income' else -amt
     new_bal = round(acc['balance'] + delta, 2)
@@ -126,6 +132,11 @@ def create_transaction(body: TransactionCreate, conn = Depends(get_db)):
              body.note, body.date))
         conn.execute('UPDATE accounts SET balance=? WHERE id=?', (new_bal, acc['id']))
         txid = cur.lastrowid
+        if body.type == 'income':
+            # 收入自动按当前分配规则拆分到七个规划账户（零头归 RANDOM）
+            allocate_income(conn, txid, amt, month_of(body.date))
+        else:
+            set_expense_jar(conn, txid, body.jar, month_of(body.date))
     return _row_to_item(conn.execute(
         f'{_SELECT} WHERE t.id=?', (txid,)).fetchone())
 
@@ -137,6 +148,8 @@ def update_transaction(txid: int, body: TransactionCreate, conn = Depends(get_db
         raise HTTPException(404, '流水不存在')
     if old['type'] not in ('income', 'expense'):
         raise HTTPException(400, '转账与调整流水不支持编辑（转账可成对删除）')
+    if body.jar and body.jar not in JAR_SET:
+        raise HTTPException(400, '支出计入的规划账户不存在')
     acc = conn.execute('SELECT * FROM accounts WHERE id=?', (body.account_id,)).fetchone()
     if not acc:
         raise HTTPException(404, '账户不存在')
@@ -171,6 +184,13 @@ def update_transaction(txid: int, body: TransactionCreate, conn = Depends(get_db
                 raise HTTPException(400, f"「{acc['name']}」余额不足")
             conn.execute('UPDATE accounts SET balance=? WHERE id=?',
                          (final_bal, acc['id']))
+        # 同步更新分配与额度归属
+        clear_allocations(conn, txid)
+        set_expense_jar(conn, txid, None, month_of(body.date))
+        if body.type == 'income':
+            allocate_income(conn, txid, amt, month_of(body.date))
+        else:
+            set_expense_jar(conn, txid, body.jar, month_of(body.date))
     return _row_to_item(conn.execute(f'{_SELECT} WHERE t.id=?', (txid,)).fetchone())
 
 
